@@ -9,6 +9,8 @@ interface AuthContextValue {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, invitationId: string) => Promise<{ error: string | null }>;
+  signInWithGoogle: () => Promise<{ error: string | null }>;
+  signInWithMicrosoft: () => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -41,20 +43,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  async function loadProfile(userId: string) {
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('id, email, role, created_at')
-      .eq('id', userId)
-      .maybeSingle();
+  async function loadProfile(userId: string, retries = 3) {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      if (attempt > 0) {
+        await new Promise(r => setTimeout(r, 800 * attempt));
+      }
+      const { data } = await supabase
+        .from('user_profiles')
+        .select('id, email, role, created_at')
+        .eq('id', userId)
+        .maybeSingle();
 
-    if (data) {
-      setProfile({
-        id: data.id,
-        email: data.email,
-        role: data.role,
-        createdAt: data.created_at,
-      });
+      if (data) {
+        setProfile({
+          id: data.id,
+          email: data.email,
+          role: data.role,
+          createdAt: data.created_at,
+        });
+        setLoading(false);
+        return;
+      }
     }
     setLoading(false);
   }
@@ -83,12 +92,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   }
 
+  async function signInWithGoogle() {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: { access_type: 'offline', prompt: 'select_account' },
+      },
+    });
+    if (error) return { error: error.message };
+    return { error: null };
+  }
+
+  async function signInWithMicrosoft() {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'azure',
+      options: {
+        redirectTo: window.location.origin,
+        scopes: 'email',
+      },
+    });
+    if (error) return { error: error.message };
+    return { error: null };
+  }
+
   async function signOut() {
     await supabase.auth.signOut();
   }
 
   return (
-    <AuthContext.Provider value={{ session, profile, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ session, profile, loading, signIn, signUp, signInWithGoogle, signInWithMicrosoft, signOut }}>
       {children}
     </AuthContext.Provider>
   );
